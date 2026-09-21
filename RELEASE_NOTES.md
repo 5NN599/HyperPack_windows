@@ -1,23 +1,21 @@
-# v0.2.8
+# v0.3.2 Release Notes
 
-## Critical code review fixes
+## 압축 엔진
 
-- UI message loop thread is pinned with `runtime.LockOSThread()`.
-- UI controls are no longer updated from the worker goroutine.
-- Worker status is polled from `WM_TIMER` on the UI thread.
-- Worker completion is delivered only through `PostMessageW`.
-- `WNDCLASSEXW` callback and class-name storage are kept alive explicitly.
-- Startup logging added to `%TEMP%\\HyperPack_startup.log`.
-- Startup error messages now include the Windows error returned by the failed initialization call.
-- Worker/temp path cleanup is centralized after operation completion.
+1. HPK4 새 포맷
+2. Level 9 dictionary 128 MiB
+3. 8 MiB groups
+4. 최대 match 65535 bytes
+5. 19-bit hash table / 32 candidates per bucket
+6. VarInt distance/length
+7. lazy lookahead
+8. DEFLATE BestCompression 2차 entropy squeeze
+9. raw fallback
+10. 멀티 worker 압축
+11. 대용량 streaming
+12. 선택적 OpenCL GPU hash assist
 
-## Core validation
+## 안정성
 
-Linux-side core extraction tests passed for:
-- Levels 0..9 round-trip
-- Random 8 MiB round-trip
-- Multi-file package round-trip
-- Archive path safety checks
-- Streaming file round-trip
-
-The release EXE was cross-compiled as PE32+ Windows x86-64 with GUI subsystem.
+GPU 함수는 예외가 발생해도 CPU fallback으로 돌아가도록 방어했습니다.
+GUI는 실제 압축 작업과 별도 프로세스에서 동작합니다.

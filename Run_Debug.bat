@@ -1,4 +1,4 @@
 @echo off
-"%~dp0HyperPack_debug.exe"
-echo.
+cd /d "%~dp0"
+HyperPack_debug.exe %*
 pause

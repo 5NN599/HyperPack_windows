@@ -1,8 +1,20 @@
-Version: 0.2.8
-Target: Windows x86-64
-GUI: Win32, UI thread pinned with runtime.LockOSThread
-Worker: hidden child process
-Streaming: enabled
-PE: PE32+ GUI
-HyperPack.exe SHA256: 36711081c41c2036a4a4be0bf979f6d0e113996a0d327878e87287c49b5f2990
-HyperPack_debug.exe SHA256: ed31549a9eae33f9a87002e4c4fef030f81ee347039825cffa3fdab18ec73762
+# Build Info
+
+Target: Windows x64
+Build: Go cross-compiled PE32+
+GUI: windowsgui subsystem
+Debug build: console subsystem
+
+HyperPack.exe SHA-256:
+279c8c34510014185b8ad8b0274a59312cafcbe400f9c162456e7d8d3e891f93
+
+HyperPack_debug.exe SHA-256:
+6a3d8e25bd8a1550e8be347c77f93363b99eeb315a8485025843bb3f365ffce0
+
+Core sanity test in the build environment:
+- repetitive data round-trip: PASS
+- structured patterned data round-trip: PASS
+- DEFLATE squeeze path: PASS
+- Windows PE format: PASS
+
+Note: the provided environment cannot execute a Windows desktop binary, so final GUI runtime validation must be performed on Windows.
