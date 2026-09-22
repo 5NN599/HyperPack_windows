@@ -1,58 +1,64 @@
-# HyperPack (Windows x64)
+**HyperPack** is an open-source high-performance lossless archiver focused on
+large-scale data compression and resource-intensive compression testing.
 
-An open-source high-performance streaming archiver designed for large-scale data payload testing.
+현재 **v0.3.2 Xtreme+** 개발 버전으로, 높은 압축률을 목표로 CPU, 메모리 및
+지원되는 경우 GPU를 적극적으로 활용하도록 개발하고 있습니다.
 
-AI와 함께 개발 중인 대용량 스트리밍 압축 프로그램, **HyperPack**의 Windows x64 데모 배포판입니다.
-
-> ⚠️ **Notice:** 본 버전은 여러 테스트와 안정성 검증을 진행하는 과정에서 공개하는 데모(Demo) 빌드입니다. 현재 1GB 크기의 LM Studio 데이터를 기준으로 테스트 시 7z 대비 약 200MB, ZIP 대비 약 100MB 정도 압축률이 뒤처져 있으나, 안정성을 확보하고 향후 7z 이상의 성능을 달성하는 것을 목표로 지속 개선 중입니다. 다양한 환경에서의 테스트와 피드백을 부탁드립니다.
+> ⚠️ **Demo Notice:** HyperPack은 현재 개발 및 테스트 단계입니다.
+> 실제 데이터에서는 7-Zip/ZIP보다 압축 결과가 클 수 있으며, 다양한 데이터셋에서
+> 안정성·압축률·속도를 지속적으로 개선하고 있습니다.
 
 ---
 
-## 🚀 주요 기능 (Features)
+## 🚀 Features
 
-- **멀티 아카이빙:** 여러 파일 및 폴더 전체를 하나의 `.hpk` 파일로 아카이빙
-- **압축률 옵션:** HPK 압축 해제 및 Level 0~9 압축률 조절 지원
-- **대용량 스트리밍:** 대용량 파일을 스트리밍 방식으로 처리
-- **Solid 압축:** 여러 파일의 데이터를 하나의 논리적 스트림으로 처리
-- **고압축 모드:** 높은 압축 레벨에서 CPU와 메모리를 적극적으로 사용
-- **논블로킹 GUI:** 압축/해제 작업 중에도 GUI 응답성 유지
-- **하위 호환성:** HPK1/v1 포맷 호환
+- **HPK Archive:** 여러 파일과 폴더를 하나의 `.hpk`로 압축
+- **Level 0~9:** 압축률과 처리량을 조절
+- **Solid Streaming:** 여러 파일의 중복 데이터를 함께 탐색
+- **Large Dictionary:** 최대 128 MiB Dictionary 사용
+- **Multi-Worker:** 최대 8개 Worker를 활용한 병렬 처리
+- **Variable-Length Encoding:** 압축 데이터의 메타데이터 오버헤드 감소
+- **2-Pass Compression:** 추가 압축 단계로 압축률 개선 시도
+- **GPU Hash Assist:** OpenCL 기반 GPU 가속 실험 기능
+- **CPU Fallback:** GPU를 사용할 수 없는 환경에서도 CPU로 동작
+- **Large File Streaming:** 대용량 파일을 스트리밍 방식으로 처리
 
-## 🛠️ 핵심 수정 사항 (v0.2.8)
+## 🧪 Current Status
 
-1. **UI 스레드 안정화:** Win32 UI 스레드를 `runtime.LockOSThread()`로 명시적으로 고정
-2. **교착 상태 방지:** 백그라운드 작업과 UI 스레드의 접근을 분리하여 응답 없음 문제 개선
-3. **메모리 수명 보장:** `WNDCLASSEXW` 클래스명 문자열 수명 문제 수정
-4. **오류 추적 기능 추가:** 초기화 오류 발생 시 `%TEMP%\HyperPack_startup.log`에서 확인 가능
+**Version: v0.3.2 Xtreme+**
 
-## 💻 실행 및 디버그 (Usage & Debug)
+현재 주요 개발 목표:
 
-1. 기본 실행을 위해 `HyperPack.exe`를 더블클릭합니다.
-2. 문제가 발생할 경우 `Run_Debug.bat`를 실행하여 콘솔 메시지를 확인해 주세요.
-3. 로그 파일 위치:
+- 7-Zip과의 압축률 격차 축소 및 경쟁
+- 대용량 데이터에서 Long-Distance Match 개선
+- Match Finder 및 Parsing 최적화
+- 멀티코어 CPU 활용 개선
+- GPU 가속 실험 및 최적화
+- 압축/해제 안정성 개선
 
-```text
-%TEMP%\HyperPack_startup.log
-```
+대표 테스트 데이터로 약 **1GB LM Studio 데이터** 등을 사용하고 있습니다.
 
-## 📊 현재 테스트 상태 (Benchmark)
+> 테스트 결과는 데이터 종류와 압축 설정에 따라 크게 달라질 수 있습니다.
 
-대표 테스트 데이터는 약 1GB 크기의 LM Studio 데이터입니다.
+## 💻 Usage
 
-- **7-Zip:** 기준
-- **HyperPack:** 7-Zip보다 약 200MB 큼
-- **ZIP:** HyperPack보다 약 100MB 작음
+1. `HyperPack.exe`를 실행합니다.
+2. 압축할 파일 또는 폴더를 선택합니다.
+3. 압축 레벨을 선택합니다.
+4. `.hpk` 파일을 생성합니다.
+5. 필요할 경우 HyperPack으로 압축을 해제합니다.
 
-> 위 결과는 특정 테스트 데이터셋에서의 개발 중 측정값이며, 모든 파일에서 동일하게 나타나는 것은 아닙니다.
+문제 발생 시 함께 제공되는 `Run_Debug.bat`를 사용하여 콘솔 로그를 확인할 수
+있습니다.
 
-## 🤝 기여 및 피드백 (Contributing)
+## 🤝 Contributing
 
 HyperPack은 오픈소스 프로젝트입니다.
 
-대용량 파일 안정성 테스트, 압축률 개선 아이디어, 알고리즘 제안, 성능 최적화 및 코드 리팩토링을 환영합니다.
+압축률 테스트, 대용량 파일 안정성 테스트, 알고리즘 개선, 성능 최적화 및
+버그 리포트를 환영합니다.
 
-버그나 제안 사항은 **Issues** 탭에 등록해 주세요.
+## 📄 License
 
-## 📄 라이선스 (License)
-
-본 프로젝트는 [MIT License](LICENSE)에 따라 자유롭게 복제, 수정, 배포 및 상업적 이용이 가능합니다.
+This project is released under the **MIT License**.
+"""
