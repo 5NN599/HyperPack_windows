@@ -5,6 +5,9 @@
 - `Run_HyperPack.bat` : 일반 실행
 - `Run_Debug.bat` : 디버그 실행
 
-압축 작업은 GUI와 별도 Worker 프로세스에서 실행됩니다. Level 9에서는 CPU와 RAM 사용량이 크게 증가할 수 있습니다.
+현재 버전: **v0.3.3 Xtreme+**
 
-HPK4 파일은 본 버전에서 생성/복원이 가능하며 무결성 검사를 수행합니다.
+128MiB dictionary, 4-byte hash Match Finder, deeper lazy parsing, RLE hybrid,
+선택적 OpenCL GPU 보조 및 CPU fallback을 사용합니다.
+
+압축 작업은 GUI와 별도 Worker 프로세스에서 실행됩니다.

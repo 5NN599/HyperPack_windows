@@ -22,7 +22,7 @@ import (
 )
 
 // HyperPack Windows standalone frontend.
-// Application release: 0.3.1 Xtreme
+// Application release: 0.3.3 Xtreme+
 // Experimental high-compression build: much larger dictionary, deeper candidate search, 1 MiB matches.
 // Compression stream remains HPK1/v1 for compatibility with v0.1 single-file archives.
 
@@ -928,7 +928,9 @@ type compressResult struct {
 }
 
 // ---------------------------- HPK4 high-compression core -------------------
-// v0.3.2: Xtreme+ engine.
+// v0.3.3: Xtreme+ engine.
+// Focus: recover short 4-7 byte matches, deterministic run-length matches,
+// deeper lazy parsing, and eliminate the full-input CRC pre-pass.
 //
 // Design goals:
 //   * Much larger LZ window than the demo HPK1/2/3 engines.
@@ -949,9 +951,9 @@ const (
 
 	hpk4MinMatch = 4
 	hpk4MaxMatch = 65535
-	hpk4HashBits = 19
+	hpk4HashBits = 20
 	hpk4HashSize = 1 << hpk4HashBits
-	hpk4Slots    = 32
+	hpk4Slots    = 16
 
 	hpk4ModeLZ    byte = 0
 	hpk4ModeRaw   byte = 1
@@ -1006,8 +1008,8 @@ func hpk4ReadHeader(r io.Reader) (hpk4Header, error) {
 func hpk4Options(level int) (groupSize, dictSize int64) {
 	switch {
 	case level >= 9:
-		// Xtreme+: large dictionary + enough independent groups to feed many
-		// workers. 64 MiB keeps the memory bounded on ordinary desktops.
+		// Xtreme+: 128 MiB dictionary. Groups stay 8 MiB so independent
+		// workers can keep a many-core CPU busy without unbounded RAM use.
 		return 8 << 20, 128 << 20
 	case level >= 8:
 		return 8 << 20, 96 << 20
@@ -1035,22 +1037,14 @@ func hpk4MaxCandidates(level int) int {
 	}
 }
 
-func hpk4Hash8(b []byte, p int) uint32 {
-	var v uint64
-	v |= uint64(b[p+0]) << 56
-	v |= uint64(b[p+1]) << 48
-	v |= uint64(b[p+2]) << 40
-	v |= uint64(b[p+3]) << 32
-	v |= uint64(b[p+4]) << 24
-	v |= uint64(b[p+5]) << 16
-	v |= uint64(b[p+6]) << 8
-	v |= uint64(b[p+7])
-	v ^= v >> 33
-	v *= 0xff51afd7ed558ccd
-	v ^= v >> 33
-	v *= 0xc4ceb9fe1a85ec53
-	v ^= v >> 33
-	return uint32(v) & (hpk4HashSize - 1)
+func hpk4Hash4(b []byte, p int) uint32 {
+	v := uint32(b[p])<<24 | uint32(b[p+1])<<16 | uint32(b[p+2])<<8 | uint32(b[p+3])
+	v ^= v >> 16
+	v *= 0x7feb352d
+	v ^= v >> 15
+	v *= 0x846ca68b
+	v ^= v >> 16
+	return v & (hpk4HashSize - 1)
 }
 
 func hpk4PutVarint(dst []byte, v uint64) []byte {
@@ -1107,26 +1101,21 @@ var (
 )
 
 const hpk4OpenCLKernels = `
-__kernel void hp_hash8(__global const uchar* data,
+__kernel void hp_hash4(__global const uchar* data,
                        __global uint* out,
                        uint n) {
     uint i = get_global_id(0);
-    if (i + 8 > n) { return; }
-    ulong v = 0;
-    v |= ((ulong)data[i+0]) << 56;
-    v |= ((ulong)data[i+1]) << 48;
-    v |= ((ulong)data[i+2]) << 40;
-    v |= ((ulong)data[i+3]) << 32;
-    v |= ((ulong)data[i+4]) << 24;
-    v |= ((ulong)data[i+5]) << 16;
-    v |= ((ulong)data[i+6]) << 8;
-    v |= ((ulong)data[i+7]);
-    v ^= v >> 33;
-    v *= (ulong)0xff51afd7ed558ccdUL;
-    v ^= v >> 33;
-    v *= (ulong)0xc4ceb9fe1a85ec53UL;
-    v ^= v >> 33;
-    out[i] = (uint)(v & 0x7ffffUL);
+    if (i + 4 > n) { return; }
+    uint v = ((uint)data[i+0] << 24) |
+             ((uint)data[i+1] << 16) |
+             ((uint)data[i+2] << 8)  |
+             ((uint)data[i+3]);
+    v ^= v >> 16;
+    v *= 0x7feb352dU;
+    v ^= v >> 15;
+    v *= 0x846ca68bU;
+    v ^= v >> 16;
+    out[i] = v & 0xfffffU;
 }
 `
 
@@ -1169,7 +1158,7 @@ func initOpenCL() {
 	})
 }
 
-func hpk4GPUHash8(data []byte) (result []uint32, ok bool) {
+func hpk4GPUHash4(data []byte) (result []uint32, ok bool) {
 	if os.Getenv("HYPERPACK_NO_GPU") == "1" {
 		return nil, false
 	}
@@ -1180,7 +1169,7 @@ func hpk4GPUHash8(data []byte) (result []uint32, ok bool) {
 	}()
 	hpk4GPUMutex.Lock()
 	defer hpk4GPUMutex.Unlock()
-	if len(data) < 8 {
+	if len(data) < 4 {
 		return nil, false
 	}
 	initOpenCL()
@@ -1218,12 +1207,9 @@ func hpk4GPUHash8(data []byte) (result []uint32, ok bool) {
 		return nil, false
 	}
 	defer clReleaseQueue.Call(queue)
-	srcPtr := uintptr(unsafe.Pointer(&[]byte(hpk4OpenCLKernels)[0]))
 	cstr := syscall.StringBytePtr(hpk4OpenCLKernels)
 	sources := []uintptr{uintptr(unsafe.Pointer(&cstr))}
-	var lengths []uintptr
-	_ = srcPtr
-	lengths = []uintptr{uintptr(len(hpk4OpenCLKernels))}
+	lengths := []uintptr{uintptr(len(hpk4OpenCLKernels))}
 	program, _, _ := clCreateProgram.Call(context, 1, uintptr(unsafe.Pointer(&sources[0])), uintptr(unsafe.Pointer(&lengths[0])), uintptr(unsafe.Pointer(&errCode)))
 	if program == 0 || errCode != 0 {
 		return nil, false
@@ -1232,7 +1218,7 @@ func hpk4GPUHash8(data []byte) (result []uint32, ok bool) {
 	if r, _, _ := clBuildProgram.Call(program, 1, uintptr(unsafe.Pointer(&device)), 0, 0, 0); r != 0 {
 		return nil, false
 	}
-	kernelName := syscall.StringBytePtr("hp_hash8")
+	kernelName := syscall.StringBytePtr("hp_hash4")
 	kernel, _, _ := clCreateKernel.Call(program, uintptr(unsafe.Pointer(kernelName)), uintptr(unsafe.Pointer(&errCode)))
 	if kernel == 0 || errCode != 0 {
 		return nil, false
@@ -1266,7 +1252,7 @@ func hpk4GPUHash8(data []byte) (result []uint32, ok bool) {
 			return nil, false
 		}
 	}
-	global := uintptr(len(data) - 7)
+	global := uintptr(len(data) - 3)
 	if r, _, _ := clNDRange.Call(queue, kernel, 1, 0, uintptr(unsafe.Pointer(&global)), 0, 0, 0, 0); r != 0 {
 		return nil, false
 	}
@@ -1318,15 +1304,16 @@ func hpk4EncodeGroup(raw, prefix []byte, level int, dict uint32) (encoded []byte
 	base := len(prefix)
 	n := len(data)
 
-	// Hash-ring index. 24 slots per bucket gives a deep candidate pool while
-	// keeping memory predictable enough to run several worker jobs at once.
+	// Hash-ring index. The 4-byte hash restores useful 4-7 byte matches that
+	// the old 8-byte hash could never find, while keeping the total index size
+	// at roughly 64 MiB per worker.
 	slots := make([]uint32, hpk4HashSize*hpk4Slots)
 	for i := range slots {
 		slots[i] = ^uint32(0)
 	}
 	cursors := make([]uint8, hpk4HashSize)
 	insertWithHash := func(p int, h uint32) {
-		if p < 0 || p+7 >= n {
+		if p < 0 || p+3 >= n {
 			return
 		}
 		b := int(h)
@@ -1335,15 +1322,15 @@ func hpk4EncodeGroup(raw, prefix []byte, level int, dict uint32) (encoded []byte
 		cursors[b] = uint8((int(cursors[b]) + 1) % hpk4Slots)
 	}
 
-	hashes, gpu := hpk4GPUHash8(data)
+	hashes, gpu := hpk4GPUHash4(data)
 	gpuUsed = gpu
 	hashAt := func(p int) uint32 {
 		if hashes != nil && p < len(hashes) {
 			return hashes[p]
 		}
-		return hpk4Hash8(data, p)
+		return hpk4Hash4(data, p)
 	}
-	for p := 0; p+7 < base; p++ {
+	for p := 0; p+3 < base; p++ {
 		insertWithHash(p, hashAt(p))
 	}
 
@@ -1367,7 +1354,7 @@ func hpk4EncodeGroup(raw, prefix []byte, level int, dict uint32) (encoded []byte
 	begin()
 
 	find := func(pos int) (int, int) {
-		if pos+7 >= n {
+		if pos+3 >= n {
 			return 0, 0
 		}
 		bucket := int(hashAt(pos))
@@ -1377,8 +1364,16 @@ func hpk4EncodeGroup(raw, prefix []byte, level int, dict uint32) (encoded []byte
 			maxL = n - pos
 		}
 		seen := 0
+		// Probe newest candidates first. The old implementation scanned slot 0
+		// upward regardless of ring position, which often compared stale matches
+		// before the most useful recent history.
+		cur := int(cursors[bucket])
 		for s := 0; s < hpk4Slots && seen < candidates; s++ {
-			cand := slots[bucket*hpk4Slots+s]
+			idx := cur - 1 - s
+			if idx < 0 {
+				idx += hpk4Slots
+			}
+			cand := slots[bucket*hpk4Slots+idx]
 			if cand == ^uint32(0) {
 				continue
 			}
@@ -1405,16 +1400,42 @@ func hpk4EncodeGroup(raw, prefix []byte, level int, dict uint32) (encoded []byte
 		return bestLen, bestDist
 	}
 
+	runLength := func(pos int) int {
+		if pos <= 0 || data[pos] != data[pos-1] {
+			return 0
+		}
+		maxL := maxLen
+		if n-pos < maxL {
+			maxL = n - pos
+		}
+		ln := 1
+		for ln < maxL && data[pos+ln] == data[pos] {
+			ln++
+		}
+		return ln
+	}
+
 	pos := base
 	for pos < n {
 		ln, dist := find(pos)
-		// 1-byte lookahead at high levels. It is cheap compared with the long
-		// match scan and avoids stealing a better match one byte later.
-		if level >= 8 && ln >= hpk4MinMatch && pos+1 < n {
-			insertWithHash(pos, hashAt(pos))
-			nl, _ := find(pos + 1)
-			if nl > ln+2 {
-				ln, dist = 0, 0
+
+		// v0.3.3 RLE hybrid: represent a long same-byte run as an ordinary
+		// distance=1 match. This needs no new on-disk token type and therefore
+		// remains readable by the existing HPK4 decoder.
+		if rle := runLength(pos); rle >= 8 && rle > ln {
+			ln, dist = rle, 1
+		}
+
+		// Deeper lazy parsing at high levels. Look ahead a few bytes without
+		// mutating the hash index, and skip the current match when a later match
+		// is materially longer after accounting for the intervening literals.
+		if level >= 8 && ln >= hpk4MinMatch {
+			for off := 1; off <= 4 && pos+off < n; off++ {
+				nl, _ := find(pos + off)
+				if nl > ln+off+1 {
+					ln, dist = 0, 0
+					break
+				}
 			}
 		}
 		if ln >= hpk4MinMatch {
@@ -1423,7 +1444,7 @@ func hpk4EncodeGroup(raw, prefix []byte, level int, dict uint32) (encoded []byte
 			out = hpk4PutVarint(out, uint64(ln-hpk4MinMatch))
 			for q := 0; q < ln; q++ {
 				p := pos + q
-				if p+7 < n {
+				if p+3 < n {
 					insertWithHash(p, hashAt(p))
 				}
 			}
@@ -1536,6 +1557,62 @@ func hpk4DecodeGroup(encoded []byte, expected int, prefix []byte, dict uint32, m
 	return out, hpk4UpdatePrefix(prefix, out, int(dict)), nil
 }
 
+func crc32MatrixTimes(mat *[32]uint32, vec uint32) uint32 {
+	var sum uint32
+	i := 0
+	for vec != 0 {
+		if vec&1 != 0 {
+			sum ^= mat[i]
+		}
+		vec >>= 1
+		i++
+	}
+	return sum
+}
+
+func crc32MatrixSquare(square, mat *[32]uint32) {
+	for n := 0; n < 32; n++ {
+		square[n] = crc32MatrixTimes(mat, mat[n])
+	}
+}
+
+// crc32Combine combines CRC-32 values for A and B as CRC(A || B).
+// This lets v0.3.3 build the final archive CRC from per-group CRCs without
+// performing a separate full-input pre-pass over large files.
+func crc32Combine(crc1, crc2 uint32, len2 int64) uint32 {
+	if len2 <= 0 {
+		return crc1
+	}
+	var even, odd [32]uint32
+	odd[0] = 0xedb88320
+	row := uint32(1)
+	for n := 1; n < 32; n++ {
+		odd[n] = row
+		row <<= 1
+	}
+	crc32MatrixSquare(&even, &odd)
+	crc32MatrixSquare(&odd, &even)
+	for {
+		crc32MatrixSquare(&even, &odd)
+		if len2&1 != 0 {
+			crc1 = crc32MatrixTimes(&even, crc1)
+		}
+		len2 >>= 1
+		if len2 == 0 {
+			break
+		}
+		crc32MatrixSquare(&odd, &even)
+		if len2&1 != 0 {
+			crc1 = crc32MatrixTimes(&odd, crc1)
+		}
+		len2 >>= 1
+		if len2 == 0 {
+			break
+		}
+	}
+	return crc1 ^ crc2
+}
+
 func hpk4WorkerCount(groups, dictSize, groupSize int64) int {
 	workers := runtime.NumCPU()
 	if workers < 1 {
@@ -1548,7 +1625,8 @@ func hpk4WorkerCount(groups, dictSize, groupSize int64) int {
 	if workers > capWorkers {
 		workers = capWorkers
 	}
-	approx := dictSize + groupSize + int64(40<<20)
+	hashIndex := int64(hpk4HashSize*hpk4Slots)*4 + int64(hpk4HashSize)
+	approx := dictSize + groupSize + hashIndex + int64(24<<20)
 	if approx > 0 {
 		maxByMem := int((4 << 30) / approx)
 		if maxByMem < 1 {
@@ -1602,10 +1680,6 @@ func compressFileStreaming(inPath, outPath string, level int, progress progressF
 	if groups > int64(^uint32(0)) {
 		return fmt.Errorf("input has too many groups")
 	}
-	inputCRC, _, err := crcAndSizeFilePath(inPath)
-	if err != nil {
-		return err
-	}
 	out, err := os.Create(outPath)
 	if err != nil {
 		return err
@@ -1617,7 +1691,7 @@ func compressFileStreaming(inPath, outPath string, level int, progress progressF
 			_ = os.Remove(outPath)
 		}
 	}()
-	if err := hpk4WriteHeader(out, hpk4Header{Magic: hpk4Magic, Flags: 0, Group: uint32(groupSize), Dict: uint32(dictSize), Groups: uint32(groups), Original: uint64(total), CRC: inputCRC}); err != nil {
+	if err := hpk4WriteHeader(out, hpk4Header{Magic: hpk4Magic, Flags: 0, Group: uint32(groupSize), Dict: uint32(dictSize), Groups: uint32(groups), Original: uint64(total), CRC: 0}); err != nil {
 		return err
 	}
 	if groups == 0 {
@@ -1666,6 +1740,7 @@ func compressFileStreaming(inPath, outPath string, level int, progress progressF
 	next := 0
 	received := 0
 	gpuSeen := false
+	combinedCRC := uint32(0)
 	for received < int(groups) {
 		res := <-results
 		received++
@@ -1696,6 +1771,7 @@ func compressFileStreaming(inPath, outPath string, level int, progress progressF
 				return er
 			}
 			gpuSeen = gpuSeen || cur.GPU
+			combinedCRC = crc32Combine(combinedCRC, cur.CRC, int64(cur.Raw))
 			delete(pending, next)
 			done := minInt64(int64(next+1)*groupSize, total)
 			if progress != nil {
@@ -1709,6 +1785,18 @@ func compressFileStreaming(inPath, outPath string, level int, progress progressF
 		}
 	}
 	wg.Wait()
+	if _, err := out.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	if err := hpk4WriteHeader(out, hpk4Header{
+		Magic: hpk4Magic, Flags: 0, Group: uint32(groupSize), Dict: uint32(dictSize),
+		Groups: uint32(groups), Original: uint64(total), CRC: combinedCRC,
+	}); err != nil {
+		return err
+	}
+	if _, err := out.Seek(0, io.SeekEnd); err != nil {
+		return err
+	}
 	if progress != nil {
 		stage := fmt.Sprintf("압축 완료 · CPU %d", workers)
 		if gpuSeen {
@@ -2423,7 +2511,7 @@ func wndProc(hwnd syscall.Handle, uMsg uint32, wParam, lParam uintptr) uintptr {
 				chooseExtract(hwnd)
 			}
 		case 1004:
-			guiMessage(hwnd, "HyperPack 0.3.2 Xtreme+", "HyperPack\n\nXtreme 고압축 멀티파일 / 폴더 패키저\n\n• 여러 파일 묶기\n• 폴더 구조 보존\n• 256MiB dictionary · 최대 1MiB match\n• 압축 작업을 별도 프로세스로 실행\n• UI 스레드와 작업 스레드 분리", mbOK|mbIconInfo)
+			guiMessage(hwnd, "HyperPack 0.3.3 Xtreme+", "HyperPack\n\nXtreme 고압축 멀티파일 / 폴더 패키저\n\n• 여러 파일 묶기\n• 폴더 구조 보존\n• 128MiB dictionary · 최대 65535-byte match\n• 압축 작업을 별도 프로세스로 실행\n• UI 스레드와 작업 스레드 분리", mbOK|mbIconInfo)
 		}
 		return 0
 	case wmAppDone:
@@ -2815,7 +2903,7 @@ func runGUI() {
 		guiMessage(0, "HyperPack", "프로그램 초기화에 실패했습니다.", mbOK|mbIconError)
 		return
 	}
-	uiClassName = utf16z("HyperPackXtreme032")
+	uiClassName = utf16z("HyperPackXtreme033")
 	uiWndProcPtr = syscall.NewCallback(wndProc)
 	windowBrush = makeBrush(colWindow)
 	headerBrush = makeBrush(colHeader)
@@ -2843,7 +2931,7 @@ func runGUI() {
 		return
 	}
 
-	titleBuf := utf16z("HyperPack 0.3.2 Xtreme+")
+	titleBuf := utf16z("HyperPack 0.3.3 Xtreme+")
 	appendStartupLog("CreateWindowExW")
 	hwnd, _, e := procCreateWindowExW.Call(
 		0,
@@ -2877,7 +2965,7 @@ func runGUI() {
 	labelTip = makeStatic(mainWnd, "Level 9 Xtreme+ = CPU / RAM 적극 사용 · GPU 자동 보조", 320, 230, 360, 25, 4005)
 	statusWnd = makeStatic(mainWnd, "준비됨", 50, 275, 720, 60, 4006)
 	btnAbout = makeButton(mainWnd, "정보", 50, 375, 100, 40, 1004)
-	footer := makeStatic(mainWnd, "HPK4 Xtreme+ · 64MiB dictionary · 64KiB+ match · 선택적 GPU hash assist", 180, 378, 560, 32, 4007)
+	footer := makeStatic(mainWnd, "HPK4 Xtreme+ · 128MiB dictionary · 65535-byte match · RLE + 4-byte hash · 선택적 GPU assist", 180, 378, 560, 32, 4007)
 	_ = footer
 
 	procShowWindow.Call(uintptr(hwnd), swShow)
