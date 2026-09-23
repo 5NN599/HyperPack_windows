@@ -1,105 +1,152 @@
-# HyperPack v0.3.3 Xtreme+
+# HyperPack v0.3.3 Xtreme+ (Windows x64)
 
-**HyperPack**은 대규모 데이터 압축 및 고성능 무손실 압축 연구를 위해 개발된 오픈소스 아카이버(Archiver)입니다. 멀티코어 CPU 자원, 대용량 사전 메모리 및 OpenCL 기반 GPU 가속 파이프라인을 적극적으로 활용하여 높은 압축률과 가속 성능을 목표로 합니다.
+**HyperPack** is an open-source high-performance lossless archiver focused on large-scale streaming compression and experimental high-ratio compression techniques.
 
-> ⚠️ **Demo Notice**
-> 
-> HyperPack v0.3.3은 현재 알고리즘 최적화 및 테스트가 진행 중인 개발 단계의 프로젝트입니다. 데이터의 고유한 패턴에 따라 기존 7-Zip이나 standard ZIP과 압축률 차이가 발생할 수 있으며, 다양한 데이터셋을 바탕으로 안정성, 압축률, 속도를 지속적으로 개선하고 있습니다.
+현재 배포 버전은 **v0.3.3 Xtreme+**이며, HPK4 포맷을 기반으로 대용량 파일과 대규모 데이터 집합에서 높은 압축률과 안정적인 복원을 목표로 개발하고 있습니다.
 
----
-
-## 🚀 Key Features
-
-* **HPK Container & Solid Streaming**: 여러 파일과 복잡한 디렉토리 구조를 단일 연속 스트림 문맥(Context)으로 패키징하여 파일 간 중복 데이터를 효과적으로 탐색 및 제거
-* **128 MiB Large Dictionary**: 최대 128 MiB 슬라이딩 사전(Sliding Dictionary) 및 링 버퍼 지원을 통해 장거리(Long-Distance) 중복 패턴 탐색 능력을 극대화
-* **고도화된 Match Finder & Lazy Parsing**: 
-  * 4-byte Hash 기반 Recent-first candidate search 적용
-  * Deeper Lazy Parsing 및 RLE Hybrid 탐색 경로 조합으로 정밀한 압축 수행
-* **8-Worker Multi-Threading**: 최대 8개 Worker 스레드에 파이프라인을 효율적으로 분할 할당하여 대용량 스트림 처리 가속
-* **Variable-Length Encoding**: Length 및 Distance 표기 시 가변 길이 인코딩을 적용하여 메타데이터 헤더 오버헤드 최소화
-* **2-Pass Compression Pipeline**: 필요에 따라 DEFLATE 2nd pass 프로세스를 거쳐 추가적인 용량 절감 시도
-* **OpenCL GPU Hash Assist & CPU Fallback**: OpenCL을 통해 GPU에서 해시 탐색을 가속하며, 미지원 환경에서는 안전하게 CPU Fallback으로 전환
-* **CRC 무결성 검증 & Debugging**: 스트림 블록 단위 CRC 체크를 통한 데이터 복원 무결성 보장 및 `Run_Debug.bat` 콘솔 로깅 지원
+> ⚠️ **Development Release:** HyperPack은 현재 개발 및 테스트 단계입니다. 아래 벤치마크는 특정 데이터셋과 설정에서 측정한 결과이며 모든 파일에 동일하게 적용되는 성능을 의미하지 않습니다.
 
 ---
 
-## 🧪 Current Status & Goals
+## 🚀 주요 기능
 
-* **Target Version**: `v0.3.3 Xtreme+ (Windows x64)`
-* **주요 개발 목표**:
-  * 7-Zip 등 기존 주요 아카이버와의 압축률 격차 축소 및 고유 압축 경쟁력 확보
-  * 복합 바이너리 및 대용량 데이터 환경에서의 Long-Distance Match 탐색 효율 제어
-  * 소형 파일 다수 포함 시 디렉토리 스캔 및 인덱싱 성능 최적화
-  * OpenCL 파이프라인 메모리 전송 구조 개편을 통한 GPU 가속 실효성 증대
-* **주요 테스트 데이터**: 약 1 GB 규모의 LM Studio 실제 모델 데이터셋 및 극단적 반복 패턴 벤치마크 데이터 활용
+- **HPK4 Archive Format** — 자체 무손실 압축/아카이빙 포맷
+- **128 MiB Dictionary** — 장거리 중복 패턴 탐색
+- **Solid Streaming** — 여러 파일의 데이터를 연속 스트림으로 처리
+- **최대 8 Workers** — 멀티코어 CPU 병렬 압축
+- **4-byte Hash Match Finder** — 짧은 매치와 중간 길이 반복 패턴 탐색 개선
+- **Recent-first Search** — 최근 후보를 우선 탐색
+- **Deeper Lazy Parsing** — 높은 압축 레벨에서 더 많은 후보를 비교
+- **RLE Hybrid Path** — 긴 동일 바이트 반복 구간 처리 개선
+- **Variable-Length Encoding** — Length / Distance 저장 오버헤드 감소
+- **선택적 DEFLATE 2차 압축** — 추가 압축 단계 지원
+- **OpenCL GPU Hash Assist** — 실험적 GPU 가속 경로
+- **CPU Fallback** — GPU를 사용할 수 없는 환경에서도 CPU로 동작
+- **Streaming 처리** — 대용량 파일을 스트리밍 방식으로 처리
+- **CRC 무결성 검증** — 압축 데이터의 무손실 복원 검증
 
 ---
 
-## 📂 Project Structure
+## 🛠️ v0.3.3 주요 변경 사항
+
+### Match Finder 개선
+
+기존 8-byte hash 중심의 검색에서 **4-byte hash 기반 검색**을 추가하여 4~7 byte 수준의 짧은 반복 패턴도 더 적극적으로 탐색하도록 개선했습니다.
+
+### Recent-first Candidate Search
+
+후보 검색 순서를 최근 슬롯부터 확인하도록 변경하여 최근에 발견된 유효한 매치를 더 빠르게 선택할 수 있도록 했습니다.
+
+### Deeper Lazy Parsing
+
+Level 8/9에서 최대 4개 위치까지 추가 lookahead를 수행하여 즉시 선택하는 것보다 더 유리한 매치 조합을 찾을 수 있도록 개선했습니다.
+
+### RLE Hybrid
+
+긴 동일 바이트 반복 구간에서 **distance=1 match**를 활용하는 하이브리드 경로를 추가했습니다. 기존 HPK4 구조를 유지하면서 반복 데이터 처리 효율을 높이는 방향입니다.
+
+### 대용량 CRC 처리 개선
+
+압축 시작 전에 전체 입력을 다시 스캔하던 방식을 개선하고, **per-group CRC combine** 방식으로 최종 CRC를 계산하여 불필요한 대용량 입력 선행 스캔을 줄였습니다.
+
+### 메모리 예산 개선
+
+Worker 메모리 계산에 실제 hash index 사용량을 반영하여 대형 Dictionary와 병렬 작업을 함께 사용할 때의 메모리 계획을 개선했습니다.
+
+### HPK4 호환성
+
+이번 버전의 주요 변경은 **encoder 중심의 개선**이며 기존 HPK4 decoder와의 호환성을 유지하도록 설계했습니다.
+
+---
+
+## 📊 실제 테스트 결과
+
+### 671MB `a` 반복 데이터
+
+| Compressor | Compressed Size |
+|---|---:|
+| **HyperPack** | **약 45 KB** |
+| 7-Zip | 약 102 KB |
+| ZIP | 약 772 KB |
+
+매우 높은 반복성을 가진 데이터에서 HyperPack의 장거리 매칭 및 스트리밍 압축 구조가 특히 강하게 나타난 사례입니다.
+
+### 약 1GB LM Studio 데이터
+
+사용자 Windows 환경의 실측에서 HyperPack과 ZIP의 최종 압축 크기 차이는 **약 5MB** 수준이었습니다.
+
+> 두 결과 모두 특정 데이터셋에서의 개발용 실측값이며, 일반적인 모든 데이터에서 동일한 압축률을 보장하는 수치는 아닙니다.
+
+---
+
+## 🧪 Core Regression Test
+
+v0.3.2와 v0.3.3의 HPK4 core를 동일한 합성 입력으로 비교했습니다.
+
+| Test | v0.3.2 | v0.3.3 |
+|---|---:|---:|
+| 8 MiB `a` repeated | 532 B | 532 B |
+| 8 MiB 7-byte motif | 593 B | 538 B |
+| 8 MiB structured pattern | 901 B | 421 B |
+
+세 테스트 모두 압축 후 압축 해제한 데이터가 원본과 byte-for-byte 일치함을 확인했습니다.
+
+이 표는 **엔지니어링 회귀 테스트**이며 실제 일반 파일의 압축 성능을 대표하는 벤치마크는 아닙니다.
+
+---
+
+## 💻 실행 방법
+
+일반 실행:
 
 ```text
-├── HyperPack.exe             # C++ 기반 메인 압축/해제 CLI 바이너리
-├── Run_Debug.bat             # 콘솔 로그 출력 및 디버깅 전용 실행 스크립트
-├── BUILD_WINDOWS.bat         # Windows 환경 빌드 스크립트
-├── BUILD_INFO.md             # 빌드 사양 및 바이너리 메타데이터
-├── BENCHMARK_REPORT.md       # 내부 성능 분석 리포트
-├── CODE_REVIEW.md            # 코드 구조 및 알고리즘 리뷰 문서
-├── gui/
-│   └── hyperpack_gui.py      # Tkinter 기반 GUI 프론트엔드
-└── docs/
-    ├── ALGORITHM_0_3_3.md    # v0.3.3 차세대 알고리즘 명세서
-    ├── FORMAT_HPK4.md        # HPK4 아카이브 포맷 규격서
-    └── bench_sizes.py        # 벤치마크 용량 측정 자동화 스크립트
+HyperPack.exe
 ```
+
+진단용 실행:
+
+```text
+HyperPack_debug.exe
+Run_Debug.bat
+```
+
+일반적인 사용 순서:
+
+1. `HyperPack.exe` 실행
+2. 압축할 파일 또는 폴더 선택
+3. 압축 레벨(Level 0~9) 선택
+4. `.hpk` 아카이브 생성
+5. 필요할 경우 HyperPack으로 압축 해제
 
 ---
 
-## 💻 Usage
+## ⚠️ 현재 알려진 제한 및 개발 과제
 
-### 1. GUI 프론트엔드 실행
-```bash
-python gui/hyperpack_gui.py
-```
-GUI 인터페이스에서 대상 파일/폴더를 선택하고 압축 옵션(Level 0~9, 사전 크기 등)을 설정하여 `.hpk` 아카이브 생성 및 해제를 수행할 수 있습니다.
+현재 다음 영역은 계속 개선 중입니다.
 
-### 2. CLI 커맨드라인 사용
-```cmd
-:: 기본 압축 명령
-HyperPack.exe c archive.hpk target_folder
-
-:: 128 MiB Dictionary 및 8 Worker 스레드 지정 압축
-HyperPack.exe c -d 128m -w 8 archive.hpk target_folder
-
-:: 아카이브 압축 해제
-HyperPack.exe x archive.hpk -o ./extracted
-```
-
-### 3. 디버그 모드 실행
-작업 수행 중 상세한 동작 과정이나 로그 확인이 필요한 경우 `Run_Debug.bat`를 실행하여 콘솔 로그를 파악할 수 있습니다.
+- Full optimal parsing
+- Context-adaptive entropy coding / ANS / Range Coder
+- OpenCL context/program 재사용 최적화
+- 수만 개 파일을 포함하는 36GB급 패키지 생성 단계의 디스크/인덱싱 병목
+- Windows 실환경에서의 자동 ZIP / 7-Zip / HyperPack 벤치마크
+- 일반적인 비반복성 데이터의 압축률 개선
 
 ---
 
-## 📊 Benchmark Insights
+## 🔐 검증 정보
 
-> **Note**: 본 수치는 특정 테스트 데이터셋 환경에서 측정한 실측 결과이며, 데이터의 유형 및 구성에 따라 압축 결과가 달라질 수 있습니다.
+이번 v0.3.3 배포판에서는 다음 검증을 수행했습니다.
 
-| 테스트 데이터셋 | 원본 용량 | HyperPack v0.3.3 | 7-Zip | ZIP (Standard) | 비고 |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **TEST A (극단적 반복 데이터)** | 약 671 MB | **약 45 KB** | 약 102 KB | 약 772 KB | 128MB 사전 및 RLE Hybrid 탐색 작렬 |
-| **TEST B (LM Studio 데이터)** | 약 1 GB | **ZIP 대비 ~5 MB 차이** | - | 기준점 | 일반 복합 바이너리 스트림 환경 |
+- Windows x64 PE release build: **PASS**
+- Windows x64 PE debug build: **PASS**
+- CRC32 combine validation: **PASS**
+- HPK4 core round-trip validation: **PASS**
+- v0.3.2 → v0.3.3 core regression comparison: **PASS**
 
----
-
-## 🤝 Contributing
-
-HyperPack은 오픈소스 프로젝트입니다. 다음과 같은 형태의 기여를 언제나 환영합니다:
-* 다양한 실전 데이터셋 기반 압축률 및 속도 벤치마크 리포트 제출
-* 대용량 파일 및 소형 파일 다수 포함 시의 안정성 검증
-* Match Finder, Parsing 알고리즘 및 OpenCL/CPU 멀티스레드 최적화 아이디어 제안
-* 버그 리포트 및 문서/주석 개선
+Windows GUI 자체 실행은 빌드 환경에서 수행할 수 없으므로 최종 GUI 런타임 검증은 실제 Windows 시스템에서 추가 확인이 필요합니다.
 
 ---
 
 ## 📄 License
 
-본 프로젝트는 **[MIT License](LICENSE)** 하에 자유롭게 이용, 수정 및 배포할 수 있습니다.
+HyperPack is released under the **MIT License**.
